@@ -1,79 +1,59 @@
-# Deprecation notice (Sep 2022)
+# Rust toolchain with arm64e support
 
-[Apple has deprecated the use of bitcode](https://developer.apple.com/documentation/xcode-release-notes/xcode-14-release-notes).
+This is a fork of [getditto/rust-bitcode](https://github.com/getditto/rust-bitcode), a collection of scripts to aid in building custom Rust toolchains for Apple platforms. The original project built toolchains with Xcode-compatible bitcode; this fork builds toolchains with `arm64e-apple-ios` target support for experimenting with Pointer Authentication Code (PAC) and Memory Integrity Enforcement (MIE).
 
-> Starting with Xcode 14, bitcode is no longer required for watchOS and tvOS applications, and the App Store no longer accepts bitcode submissions from Xcode 14.
+**This is for testing purposes only.**
 
-We have confirmed that libraries produced by the standard Rust iOS toolchain can be
-included in apps using Xcode 14, which pass App Store validation.
+## How it works
 
-This custom toolchain is **no longer needed** and will not be maintained going forward. 🎉
-
-The old readme is preserved below for future reference.
-
-# Rust toolchain for Xcode-compatible iOS bitcode
-
-In standard releases of Rust, the bitcode in ARM64 iOS targets is often
-incompatible with Xcode because they use different versions of LLVM. This is a
-[known issue](https://github.com/rust-lang/rust/issues/35968) with no clear
-long-term solution yet.
-
-This repository contains scripts for building and installing a custom Rust
-nightly toolchain where the Rust compiler's version of LLVM matches Xcode.
-Software built using this toolchain can be included in bitcode-enabled apps that
-will install on real iOS devices.
-
-Binary releases of the toolchain will be created periodically and attached to
-this repository, at least until there is a better upstream solution.
-
-This repository is maintained by [Ditto](https://www.ditto.live). We use it
-ourselves and want to share it for the benefit of the Rust iOS community! Please
-create an issue if you notice any problems.
-
-These scripts work for 64-bit iOS only. watchOS and tvOS are
-[not fully supported by Rust yet](https://github.com/rust-lang/rust/issues/48862).
-
-## Pre-compiled releases
-
-Visit the [releases page](https://github.com/getditto/rust-bitcode/releases) and
-download a zip file. It will have a name of the form
-`rust-ios-arm64-xxx.zip`.
-
-Unzip the file and open a terminal to the extracted directory. Remove the
-quarantine flag so the binaries will be trusted, then run the installation
-script:
-
-```bash
-xattr -r -d com.apple.quarantine .
-./install.sh
-```
-
-This will install the toolchain in `~/.rustup/toolchains/ios-arm64-xxx`.
+The scripts build a custom Rust toolchain using Apple's Swift LLVM fork, which includes arm64e support that hasn't been upstreamed to LLVM yet. This allows Rust to target `arm64e-apple-ios` with full std library support.
 
 ## Build from source
 
-1. Ensure required build tools are installed. If you are using homebrew: `brew
-   install ninja cmake openssl`
+1. Ensure required build tools are installed:
+   ```bash
+   brew install ninja cmake openssl
+   ```
+
 2. Clone this repository.
-3. Review `config.sh` to make sure the the Rust and LLVM versions are suitable.
-4. In a terminal, run `./build.sh`. This will clone the Rust and LLVM
-   repositories under `build/` and compile them. The toolchain will end up
-   at `build/rust-build/build/x86_64-apple-darwin/stage2`.
-5. Run `./install.sh`. This will install the toolchain in
-   `~/.rustup/toolchains/ios-arm64-1.60.0`, making it available in rustup.
+
+3. Review `config.sh` to check the Rust and LLVM versions.
+
+4. Run the build:
+   ```bash
+   ./build.sh
+   ```
+   This will clone Rust and Apple's Swift LLVM under `build/` and compile them. The build takes approximately 30-60 minutes.
+
+5. Install the toolchain:
+   ```bash
+   ./install.sh
+   ```
+   This installs to `~/.rustup/toolchains/arm64e-<version>`.
 
 ## Using the toolchain
 
-Build your library like this:
+Build your library targeting arm64e iOS:
 
 ```bash
-cargo +ios-arm64-1.60.0 build --target aarch64-apple-ios --release --lib
+cargo +arm64e-1.92.0 build --target arm64e-apple-ios --release
 ```
+
+Or use rustc directly:
+
+```bash
+rustup run arm64e-1.92.0 rustc --target arm64e-apple-ios ...
+```
+
+## Available targets
+
+The toolchain includes pre-built std for:
+- `aarch64-apple-darwin` (host)
+- `aarch64-apple-ios`
+- `arm64e-apple-ios`
 
 ## License
 
-The shell scripts in this repository are made available under the permissive
-Apache 2.0 licence. Refer to the [LICENSE](LICENSE) file.
+The shell scripts in this repository are made available under the Apache 2.0 licence. See [LICENSE](LICENSE).
 
-Binary releases contain LLVM and Rust. See [LICENSE-LLVM](LICENSE-LLVM) and [LICENSE-RUST](LICENSE-RUST) for
-their respective licenses. These licenses are included in the binary releases.
+Binary releases contain LLVM and Rust. See [LICENSE-LLVM](LICENSE-LLVM) and [LICENSE-RUST](LICENSE-RUST) for their respective licenses.

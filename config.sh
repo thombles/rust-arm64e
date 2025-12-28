@@ -1,38 +1,39 @@
-# 1. Select the best branch, tag or commit hash from https://github.com/apple/llvm-project
-# The recommended approach is to use the tagged release that matches the Swift version
-# returned by the command below:
-# $ xcrun -sdk iphoneos swiftc --version
+# Configuration for building Rust with Apple's Swift LLVM for arm64e support
+#
+# This builds a custom Rust toolchain with arm64e-apple-ios target support,
+# using Apple's Swift LLVM which includes Pointer Authentication (PAC) and
+# Memory Integrity Enforcement (MIE) support.
+#
+# To check your local Swift/LLVM version: xcrun -sdk iphoneos swiftc --version
 
 set -euxo pipefail
 
-RUST_TOOLCHAIN="1.63.0"
+# 1. Select the Rust version
+# Use a stable release like "1.92.0" or nightly like "nightly-2025-12-20"
+RUST_VERSION="1.92.0"
 
-# Note(Daniel): the official tagged releases of that llvm fork are currently
-# lagging too much behind the official `llvm`, which makes them incompatible
-# with the LLVM API required to compile the Rust toolchain, at least as of 1.60.
-# So neither swift-5.6.1-RELEASE nor swift-5.7-DEVELOPMENT-SNAPSHOT-2022-04-12-a
-#
-# But the tip of `apple/llvm-project`'s is too advanced as well, so I've had
-# to find a "sweet spot" in between both. I guess a decent approach could be
-# to start at https://github.com/rust-lang/rust/blob/1.60.0/.gitmodules#L37, and
-# to find a commit in `apple/llvm-project` close to it (ideally containing it)
-LLVM_BRANCH=99b5eb2d3a61b55a61849cebabf1d5d66b4a13c4
+# 2. Select the Swift LLVM tag from https://github.com/swiftlang/llvm-project
+# Use a development snapshot that matches your Xcode/Swift version.
+# Recent snapshots are based on LLVM 21.1.x which is compatible with Rust 1.92+
+# Check available tags: https://github.com/swiftlang/llvm-project/tags
+LLVM_TAG="swift-DEVELOPMENT-SNAPSHOT-2025-12-19-a"
+
+# LLVM repository URL (swiftlang has arm64e/PAC support)
+LLVM_REPO="https://github.com/swiftlang/llvm-project.git"
 
 get_rust_commit_for_toolchain() (
     # Yields "" for a toolchain like `x.y.z`, and `mm-dd-yy` for `nightly-mm-dd-yy`
-    IF_NIGHTLY_DATE_STRIPPED=$(echo "${RUST_TOOLCHAIN}" | sed -n 's/^nightly-//p')
+    IF_NIGHTLY_DATE_STRIPPED=$(echo "${RUST_VERSION}" | sed -n 's/^nightly-//p')
     if [ -n "${IF_NIGHTLY_DATE_STRIPPED}" ]; then # `if let Some(nightly_date)`
-        curl "https://static.rust-lang.org/dist/${IF_NIGHTLY_DATE_STRIPPED}/channel-rust-nightly-git-commit-hash.txt"
+        curl -s "https://static.rust-lang.org/dist/${IF_NIGHTLY_DATE_STRIPPED}/channel-rust-nightly-git-commit-hash.txt"
     else
-        echo "refs/tags/${RUST_TOOLCHAIN}"
+        echo "refs/tags/${RUST_VERSION}"
     fi
 )
 
-# 2. Select the best branch, tag or commit hash from https://github.com/rust-lang/rust
-# Thanks to `get_rust_commit_for_toolchain` helper, this should no longer need
-# to be manually done.
+# 3. Derived configuration
 RUST_BRANCH="$(get_rust_commit_for_toolchain)"
 
-# 3. Select a name for the toolchain you want to install as. The toolchain will be installed
-# under $HOME/.rustup/toolchains/rust-$RUST_TOOLCHAIN
-RUST_TOOLCHAIN="ios-arm64-${RUST_TOOLCHAIN}"
+# 4. Toolchain name for rustup installation
+# Will be installed under $HOME/.rustup/toolchains/$RUST_TOOLCHAIN
+RUST_TOOLCHAIN="arm64e-${RUST_VERSION}"

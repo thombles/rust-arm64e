@@ -1,17 +1,18 @@
 #!/bin/bash
 
-set -euxo
+set -euxo pipefail
 
 source config.sh
 
 WORKING_DIR="$(pwd)/build"
-RUST_TARGET_ARCH="$(rustc --print cfg | grep target_arch | awk -F= '{ print $2 }' | tr -d '"')"
+HOST_ARCH="$(rustc -vV | sed -n 's/^host: //p')"
 
-STAGE_DIR="${WORKING_DIR}/rust-build/build/${RUST_TARGET_ARCH}-apple-darwin/stage2"
+STAGE_DIR="${WORKING_DIR}/rust/build/${HOST_ARCH}/stage2"
 
-# remove unnecessary files from output
+# remove unnecessary files from output (src and rustc-src contain symlink cycles)
 
 rm -rf "${STAGE_DIR}/lib/rustlib/src"
+rm -rf "${STAGE_DIR}/lib/rustlib/rustc-src"
 
 # setup toolchain directory
 
@@ -23,6 +24,16 @@ mkdir -p "${DEST_TOOLCHAIN}"
 # install artifacts
 
 cp -r "${STAGE_DIR}"/* "${DEST_TOOLCHAIN}"
-cp -r "${STAGE_DIR}-tools/${RUST_TARGET_ARCH}-apple-darwin/release/cargo" "${DEST_TOOLCHAIN}/bin"
+cp -r "${STAGE_DIR}-tools-bin"/* "${DEST_TOOLCHAIN}/bin"
 
-echo "Installed bitcode-enabled Rust toolchain. Use with: +${RUST_TOOLCHAIN}"
+echo ""
+echo "=============================================="
+echo "Installed arm64e Rust toolchain: ${RUST_TOOLCHAIN}"
+echo "=============================================="
+echo ""
+echo "Use with: rustup run ${RUST_TOOLCHAIN} rustc ..."
+echo "Or:       cargo +${RUST_TOOLCHAIN} build ..."
+echo ""
+echo "Available targets:"
+"${DEST_TOOLCHAIN}/bin/rustc" --print target-list | grep -E "arm64e|aarch64-apple"
+echo ""

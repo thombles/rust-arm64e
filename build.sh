@@ -1,6 +1,9 @@
 #!/bin/bash
 
-set -euxo
+# Build script for Rust with Apple's Swift LLVM for arm64e support
+# This creates a custom toolchain with arm64e-apple-ios target enabled
+
+set -euxo pipefail
 
 source config.sh
 
@@ -29,12 +32,12 @@ export OPENSSL_STATIC=1
 
 if [ ! -d "$OPENSSL_DIR" ]; then
     printf "OpenSSL not found at expected location (%s). Trying another location...\n" "${OPENSSL_DIR}"
-    
+
     # location where brew installs the latest openssl version (in 2022.06)
     export OPENSSL_DIR='/opt/homebrew/opt/openssl@3'
     if [ ! -d "$OPENSSL_DIR" ]; then
         printf "OpenSSL not found at expected location (%s). Trying another location...\n" "${OPENSSL_DIR}"
-        
+
         # location where macports installs the latest openssl version (in 2022.06)
         export OPENSSL_DIR='/opt/local/libexec/openssl3'
         if [ ! -d "$OPENSSL_DIR" ]; then
@@ -55,17 +58,25 @@ WORKING_DIR="$(pwd)/build"
 mkdir -p "$WORKING_DIR"
 cd "$WORKING_DIR"
 
+# Clone Swift's LLVM (has arm64e/PAC support)
 if [ ! -d "llvm-project" ]; then
     git clone \
-        --shallow-since="1 year" --no-single-branch \
-        https://github.com/apple/llvm-project.git \
+        --depth 1 \
+        --branch "$LLVM_TAG" \
+        "$LLVM_REPO" \
     ;
 fi
 (cd "llvm-project"
     git reset --hard
-    git clean -f
-    git checkout "$LLVM_BRANCH"
-    git apply ../../patches/llvm-system-libs.patch
+    git clean -fd
+    # Try to apply the system-libs patch if it applies cleanly
+    # This may not be needed for newer LLVM versions
+    if git apply --check ../../patches/llvm-system-libs.patch 2>/dev/null; then
+        git apply ../../patches/llvm-system-libs.patch
+        echo "Applied llvm-system-libs.patch"
+    else
+        echo "Skipping llvm-system-libs.patch (may not be needed for this LLVM version)"
+    fi
 )
 
 # setup llvm build directory
@@ -78,6 +89,10 @@ mkdir -p llvm-build
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_INSTALL_UTILS=ON \
         -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' \
+        -DLLVM_ENABLE_PROJECTS='clang;lld' \
+        -DLLVM_ENABLE_RUNTIMES='' \
+        -DLLVM_ENABLE_ZSTD=OFF \
+        -DLLVM_ENABLE_ZLIB=OFF \
         -G Ninja \
     ;
     ninja
@@ -91,21 +106,71 @@ if [ ! -d "rust" ]; then
 fi
 (cd rust
     git reset --hard
-    git clean -f
+    git clean -fd
+    git fetch --tags
     git checkout "$RUST_BRANCH"
 )
 
-# setup rust build directory
+# Apply patches for Swift LLVM compatibility
+# Swift LLVM 21.x has a mix of API versions:
+# - PGOOptions: Has LLVM 22 API (no FileSystem parameter)
+# - getSummaryList: Has LLVM 20 API (.SummaryList member, not method)
+# - LintPass, getGUID, cfiFunctions: Has LLVM 21 API
+PASS_WRAPPER="$WORKING_DIR/rust/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp"
+if [ -f "$PASS_WRAPPER" ]; then
+    echo "Patching PassWrapper.cpp for Swift LLVM 21.x API compatibility..."
 
-mkdir -p rust-build
-(cd rust-build
-    ../rust/configure \
-        --llvm-config="$WORKING_DIR/llvm-root/bin/llvm-config" \
-        --target=aarch64-apple-ios \
-        --enable-extended \
-        --tools=cargo \
-        --release-channel=nightly \
-    ;
-    CFLAGS_aarch64_apple_ios=-fembed-bitcode \
-        python "$WORKING_DIR/rust/x.py" build --stage 2
+    # PGOOptions: Change version checks from 22 to 21 (Swift LLVM 21 has LLVM 22 PGOOptions API)
+    sed -i '' 's/LLVM_VERSION_GE(22, 0)/LLVM_VERSION_GE(21, 0)/g' "$PASS_WRAPPER"
+    sed -i '' 's/LLVM_VERSION_LT(22, 0)/LLVM_VERSION_LT(21, 0)/g' "$PASS_WRAPPER"
+
+    # getSummaryList: Only these specific lines need to use old API (.SummaryList)
+    # Swift LLVM 21 doesn't have .getSummaryList() on GlobalValueSummaryInfo
+    # We target the specific pattern that accesses I.second.getSummaryList() or List.second.getSummaryList()
+    sed -i '' 's/I\.second\.getSummaryList()/I.second.SummaryList/g' "$PASS_WRAPPER"
+    sed -i '' 's/List\.second\.getSummaryList()/List.second.SummaryList/g' "$PASS_WRAPPER"
+
+    echo "Patched PassWrapper.cpp"
+fi
+
+# Determine host triple
+HOST_TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+
+# Create bootstrap.toml for rust build configuration
+cat > "$WORKING_DIR/rust/bootstrap.toml" << EOF
+# Bootstrap configuration for arm64e-apple-ios custom toolchain
+
+[build]
+# Build for host and arm64e iOS target
+host = ["$HOST_TRIPLE"]
+target = ["$HOST_TRIPLE", "arm64e-apple-ios", "aarch64-apple-ios"]
+extended = true
+tools = ["cargo", "rustfmt", "clippy"]
+
+[rust]
+channel = "nightly"
+# Enable debug assertions for better error messages during development
+debug-assertions = false
+# LLD is useful but not strictly required
+lld = false
+
+[llvm]
+# Use our custom-built Swift LLVM
+download-ci-llvm = false
+
+[target.$HOST_TRIPLE]
+llvm-config = "$WORKING_DIR/llvm-root/bin/llvm-config"
+
+[target.arm64e-apple-ios]
+llvm-config = "$WORKING_DIR/llvm-root/bin/llvm-config"
+
+[target.aarch64-apple-ios]
+llvm-config = "$WORKING_DIR/llvm-root/bin/llvm-config"
+EOF
+
+echo "Created bootstrap.toml with arm64e-apple-ios target"
+
+# Build rust
+(cd rust
+    python3 x.py build --stage 2
 )
