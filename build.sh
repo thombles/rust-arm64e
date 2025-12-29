@@ -5,6 +5,9 @@
 
 set -euxo pipefail
 
+# Calculate script directory before changing directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 source config.sh
 
 # verify build requirements are present
@@ -109,29 +112,20 @@ fi
     git clean -fd
     git fetch --tags
     git checkout "$RUST_BRANCH"
+    # Clean the build directory to ensure patches take effect
+    rm -rf build/
 )
 
-# Apply patches for Swift LLVM compatibility
-# Swift LLVM 21.x has a mix of API versions:
-# - PGOOptions: Has LLVM 22 API (no FileSystem parameter)
-# - getSummaryList: Has LLVM 20 API (.SummaryList member, not method)
-# - LintPass, getGUID, cfiFunctions: Has LLVM 21 API
-PASS_WRAPPER="$WORKING_DIR/rust/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp"
-if [ -f "$PASS_WRAPPER" ]; then
-    echo "Patching PassWrapper.cpp for Swift LLVM 21.x API compatibility..."
-
-    # PGOOptions: Change version checks from 22 to 21 (Swift LLVM 21 has LLVM 22 PGOOptions API)
-    sed -i '' 's/LLVM_VERSION_GE(22, 0)/LLVM_VERSION_GE(21, 0)/g' "$PASS_WRAPPER"
-    sed -i '' 's/LLVM_VERSION_LT(22, 0)/LLVM_VERSION_LT(21, 0)/g' "$PASS_WRAPPER"
-
-    # getSummaryList: Only these specific lines need to use old API (.SummaryList)
-    # Swift LLVM 21 doesn't have .getSummaryList() on GlobalValueSummaryInfo
-    # We target the specific pattern that accesses I.second.getSummaryList() or List.second.getSummaryList()
-    sed -i '' 's/I\.second\.getSummaryList()/I.second.SummaryList/g' "$PASS_WRAPPER"
-    sed -i '' 's/List\.second\.getSummaryList()/List.second.SummaryList/g' "$PASS_WRAPPER"
-
-    echo "Patched PassWrapper.cpp"
-fi
+# Apply Rust patches for Swift LLVM compatibility and arm64e support
+# Patches are stored in rust-patches/ directory
+echo "Applying Rust patches..."
+for patch in "$SCRIPT_DIR"/rust-patches/*.patch; do
+    if [ -f "$patch" ]; then
+        echo "Applying $(basename "$patch")..."
+        git -C "$WORKING_DIR/rust" apply "$patch"
+    fi
+done
+echo "Applied all Rust patches"
 
 # Determine host triple
 HOST_TRIPLE=$(rustc -vV | sed -n 's/^host: //p')

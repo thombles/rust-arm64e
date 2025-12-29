@@ -1,0 +1,50 @@
+diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
+index 808aaceab4d..c146ffa4326 100644
+--- a/compiler/rustc_codegen_llvm/src/context.rs
++++ b/compiler/rustc_codegen_llvm/src/context.rs
+@@ -234,6 +234,14 @@ pub(crate) unsafe fn create_module<'ll>(
+         llvm::LLVMRustSetNormalizedTarget(llmod, llvm_target.as_ptr());
+     }
+ 
++    // Set PtrAuth ABI version for arm64e targets to ensure correct CPU subtype
++    // This produces caps=0x80 instead of caps=0x00 (arm64e.old) in Mach-O headers
++    if sess.target.llvm_target.starts_with("arm64e") {
++        unsafe {
++            llvm::LLVMRustSetPtrAuthABIVersion(llmod, 0, false);
++        }
++    }
++
+     let reloc_model = sess.relocation_model();
+     if matches!(reloc_model, RelocModel::Pic | RelocModel::Pie) {
+         unsafe {
+diff --git a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
+index 2456ed2e46d..07026342355 100644
+--- a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
+@@ -2392,6 +2392,7 @@ pub(crate) fn LLVMRustPrintModule(
+     pub(crate) fn LLVMRustSetLLVMOptions(Argc: c_int, Argv: *const *const c_char);
+     pub(crate) fn LLVMRustPrintPasses();
+     pub(crate) fn LLVMRustSetNormalizedTarget(M: &Module, triple: *const c_char);
++    pub(crate) fn LLVMRustSetPtrAuthABIVersion(M: &Module, Version: c_int, Kernel: bool);
+     pub(crate) fn LLVMRustRunRestrictionPass(M: &Module, syms: *const *const c_char, len: size_t);
+ 
+     pub(crate) fn LLVMRustWriteTwineToString(T: &Twine, s: &RustString);
+diff --git a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
+index 6b4f8a6dba7..b232a12b4a4 100644
+--- a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
++++ b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
+@@ -132,6 +132,14 @@ extern "C" void LLVMRustSetNormalizedTarget(LLVMModuleRef M,
+ #endif
+ }
+ 
++extern "C" void LLVMRustSetPtrAuthABIVersion(LLVMModuleRef M, int Version, bool Kernel) {
++  Module *Mod = unwrap(M);
++  Module::PtrAuthABIVersion ABIVersion;
++  ABIVersion.Version = Version;
++  ABIVersion.Kernel = Kernel;
++  Mod->setPtrAuthABIVersion(ABIVersion);
++}
++
+ extern "C" void LLVMRustPrintPassTimings(RustStringRef OutBuf) {
+   auto OS = RawRustStringOstream(OutBuf);
+   TimerGroup::printAll(OS);
