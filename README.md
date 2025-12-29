@@ -45,6 +45,8 @@ Or use rustc directly:
 rustup run arm64e-1.92.0 rustc --target arm64e-apple-ios ...
 ```
 
+If you want a debug build, use `RUSTFLAGS="-C debuginfo=1"` to avoid a crash.
+
 ## Available targets
 
 The toolchain includes pre-built std for:
